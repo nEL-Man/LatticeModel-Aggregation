@@ -1,0 +1,87 @@
+
+CITATION
+
+When using this model in any scientific work please cite the paper: 
+
+Abeln S, Vendruscolo M, Dobson CM, Frenkel D (2014) 
+A Simple Lattice Model That Captures Protein Folding, Aggregation 
+and Amyloid Formation. 
+PLoS ONE 9(1): e85185. doi:10.1371/journal.pone.0085185
+
+http://dx.plos.org/10.1371/journal.pone.0085185
+
+
+
+
+DOCUMENTATION
+
+The header files of the HB-Lattice code have been annotated with Doxygen style 
+comments, on which an online reference manual for the source code is based. The 
+documentation can be found at:
+
+http://abeln.bitbucket.org/HB-Lattice/
+
+Alternatively, you may compile the documentation using Doxygen, and the 
+Doxyfile in the source folder.
+
+
+SOURCE
+
+The source code for the simulation and design of the HB-Lattice model can be 
+found in the /source folder
+
+The code may be compiled using the Makefile provided in the source folder.
+
+RUNNING THE SIMULATION
+
+The executable may be run using the shell scripts in runScripts folder. In 
+simulation.sh several examples of command line options may be given. Command 
+line options are listed in the source file App.cpp
+
+ANALYSIS
+
+Some python based analysis scripts are provided in the analysis folder
+    
+
+DOWNLOAD
+
+The code is kept in a public git repository on BitBucket.org
+The latest version of the code may be downloaded from:
+
+http://bitbucket.org/abeln/hb-lattice/get/master.tar.gz
+
+The repository may be accessed from:
+ 
+http://bitbucket.org/abeln/hb-lattice
+
+
+ 
+INSTALLATION REQUIREMENTS
+
+To compile this code, Open MPI libraries need to be installed. We have 
+successfully compiled the code both on Linux or Mac like platforms. Note that 
+depending on your type of mpi installation, the finalize command in ptemp.cpp 
+may need to be removed.
+
+
+
+
+
+LICENSE
+
+HB-Lattice model for simulation and design of folding proteins and fibril 
+formation.
+
+Copyright (C) 2013  Sanne Abeln
+
+This program is free software: you can redistribute it and/or modify it under 
+the terms of the GNU General Public License as published by the Free Software 
+Foundation version 3.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY 
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A 
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with 
+this program, see gpl-3.0.txt or see:
+http://www.gnu.org/licenses/
