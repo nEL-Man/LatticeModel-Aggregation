@@ -1,0 +1,6 @@
+# In project root directory
+echo "numpy
+matplotlib
+pandas
+scipy
+pytest" > requirements.txt
