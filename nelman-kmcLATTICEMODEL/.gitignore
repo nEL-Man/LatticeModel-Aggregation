@@ -1,0 +1,21 @@
+echo "# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments
+venv/
+.env
+
+# Results
+results/*
+!results/.gitkeep
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log" > .gitignore
