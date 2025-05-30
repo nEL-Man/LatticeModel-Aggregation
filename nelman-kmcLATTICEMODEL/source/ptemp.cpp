@@ -1,285 +1,194 @@
-/**
- * \file   ptemp.cpp
- * \date   May 2013
- * \author Sanne Abeln
- * \brief  Defines methods for parallel tempering using openmpi also contains the "main" function
- */
+import math
+import random
+import sys
+from mpi4py import MPI
+from typing import List, Tuple, Optional
 
+# Constants
+MAX_PROCS = 32
+MASTER = 0
+SWAP_REQUEST = 1
+ALL_DONE = 2
+LAMBDA_COR = False
 
-#include <mpi.h>
-#include <stdio.h>
-#include <iostream>
-#include <math.h>
-#include <cstdlib>
+# Global variables
+betas: List[float] = [0.0] * MAX_PROCS
+betaID2node: List[int] = [0] * MAX_PROCS
+node2betaID: List[int] = [0] * MAX_PROCS
+energies: List[int] = [0] * MAX_PROCS
+nChains: List[int] = [0] * MAX_PROCS
+swapacc: List[int] = [0] * MAX_PROCS
+swaptry: List[int] = [0] * MAX_PROCS
 
+myBeta: float = 0.0
+swapT: bool = True
 
-#include "GranCan.hpp"
-#include "App.hpp"
-#include "ptemp.h"
-#include "Design.hpp"
-#include "MonteCarlo.hpp"
+# Assuming these classes are defined elsewhere
+class Design:
+    pass
 
+class MonteCarlo:
+    pass
 
-#define LISA
+class App:
+    pass
 
-using namespace std;
-//using namespace __gnu_cxx;
+def init_betas(min_beta: float, max_beta: float, num_procs: int, linear_T: bool) -> None:
+    if num_procs == 1:
+        betas[0] = (min_beta + max_beta) / 2
+        betaID2node[0] = 0
+        node2betaID[0] = 0
+    else:
+        if not linear_T:
+            step = (max_beta - min_beta) / (num_procs - 1)
+            for i in range(num_procs):
+                betas[i] = min_beta + i * step
+                betaID2node[i] = i
+                node2betaID[i] = i
+                print(f"node {i} beta {betas[i]} T {0.01 / betas[i]}")
+        else:
+            max_T = 0.01 / min_beta
+            min_T = 0.01 / max_beta
+            temperatures = [0.0] * num_procs
+            step = (max_T - min_T) / (num_procs - 1)
+            for i in range(num_procs):
+                temperatures[num_procs - i - 1] = min_T + i * step
+            
+            for i in range(num_procs):
+                betas[i] = 0.01 / temperatures[i]
+                betaID2node[i] = i
+                node2betaID[i] = i
+                print(f"node {i} beta {betas[i]} T {temperatures[i]}")
 
-//mpiCC tstmpi.cpp -o tstmpi
+def try_swap(betaID1: int, betaID2: int) -> bool:
+    print(f"trial: {betaID1} {betaID2}")
+    node1 = betaID2node[betaID1]
+    node2 = betaID2node[betaID2]
+    beta1 = betas[betaID1]
+    beta2 = betas[betaID2]
+    real_beta1 = 100 * beta1
+    real_beta2 = 100 * beta2
 
+    energy1 = energies[node1]
+    energy2 = energies[node2]
 
+    nChains1 = nChains[node1]
+    nChains2 = nChains[node2]
 
-// MESSAGE TYPES
-#define SWAP_REQUEST 1
-#define ALL_DONE 2
-
-
-
-// FORWARD DECLARATIONS
-
-bool trySwap(int,int);
-int initBetas(double minBeta,double maxBeta);
-
-// GLOBALS
-int MASTER =0;
-int myRank;
-bool LAMBDA_COR = false;
-
-
-double betas[MAX_PROCS];
-int betaID2node[MAX_PROCS];
-int node2betaID[MAX_PROCS];
-int energies[MAX_PROCS];
-int nChains[MAX_PROCS];
-int swapacc[MAX_PROCS]={0};
-int swaptry[MAX_PROCS]={0};
-
-
-double myBeta;
-int num_procs;
-
-bool swapT=true;
-
-//Rates * transitionRates;
-
-//double fraction_swaps=0.01;
-
-
-int main(int argc, char *argv[]) {
-
-  ///////////////////
-  // contains instances of classes:
-  // Design
-  Design * design=NULL;
-  
-  // MonteCarlo
-  MonteCarlo * mcSim = NULL;
-
-  // App is used to store global variables and command line arguments
-  //
-  ////////////////////
-
-  //int steps=0;
-  char name[MPI_MAX_PROCESSOR_NAME];
-  int namelen;
-  
-
-
-  MPI_Init(&argc, &argv);
-  MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
-  MPI::Get_processor_name(name, namelen);
-  //MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  
-  /// get process rank
-  myRank = MPI::COMM_WORLD.Get_rank ( );
-  App::myRank= myRank;
-
-  /// check number of processes
-  if(num_procs > MAX_PROCS){
-    cout<< "too many processes: "<<num_procs;
-    exit(1);
-  }
-  printf("Process %d out of %d realp %s \n", myRank, num_procs,name);
-
-  /// initialise random number generator with rank
-  srand48(myRank);  
-
-  /// pass arguments to App
-  App::init(argc, argv);
-
-
-  /// initialise Monte Carlo and/or  Design
-  if(App::designProgram){
-    design= new Design();
-    if(! App::useOldFormat){
-      design->init(App::fn_in);
-    }else{
-      design->initOldFormat(App::fn_in);
-    }
-  }
- 
-  
-  mcSim = App::getMonteCarlo();
-
-  cout<< "finished intilialising"<< endl;
-  if(myRank==MASTER){
-    initBetas(App::minBeta,App::maxBeta);
-  }
-
-  MPI::COMM_WORLD.Bcast(&node2betaID,num_procs,MPI::INT, MASTER);
-  MPI::COMM_WORLD.Bcast(&betas,num_procs,MPI::DOUBLE, MASTER);
-  MPI::COMM_WORLD.Bcast(&betaID2node,num_procs,MPI::INT, MASTER);
-  // MPI::COMM_WORLD.Barrier();
-  myBeta=betas[node2betaID[myRank]];
-
-  cout<< "betas set"<< endl;
-
-  for(int swaps=0;swaps<mcSim->total_swaps;swaps++){
-    //cout<< "MC process: "<<myRank<< " at beta: "<< myBeta<<" ";
-    //cout<< "betaID "<< node2betaID[myRank]<<endl;  
+    dE = float(energy1 - energy2)
+    dB = beta1 - beta2
     
-    //should check if beta is changed ... 
-    bool myBetaChanged = true;
+    if LAMBDA_COR:
+        prefactor = pow(real_beta1 / real_beta2, (3/2) * (nChains1 - nChains2))
+    else:
+        prefactor = 1.0
+
+    p_acc_swap = prefactor * math.exp(dE * dB)
+    swaptry[betaID1] += 1
+    swaptry[betaID2] += 1
+
+    if random.random() < p_acc_swap:
+        print(f"SWAPPING {beta1} with energy: {energy1} at node {node1} "
+              f"with {beta2} with energy: {energy2} at node {node2}")
+        betaID2node[betaID1] = node2
+        betaID2node[betaID2] = node1
+        node2betaID[node1] = betaID2
+        node2betaID[node2] = betaID1
+        swapacc[betaID1] += 1
+        swapacc[betaID2] += 1
+        return True
+    else:
+        return False
+
+def main():
+    # Initialize MPI
+    comm = MPI.COMM_WORLD
+    num_procs = comm.Get_size()
+    my_rank = comm.Get_rank()
+    name = MPI.Get_processor_name()
     
-    int myEnergy;
-    if(App::designProgram){    
-      design->designProcedure(myBeta,mcSim->steps);
-    }else{
-      myEnergy = mcSim->MC( myBeta,node2betaID[myRank],myBetaChanged);
-    }
+    App.myRank = my_rank  # Assuming App is a class with this attribute
 
+    # Check number of processes
+    if num_procs > MAX_PROCS:
+        print(f"Too many processes: {num_procs}")
+        sys.exit(1)
 
-    MPI::COMM_WORLD.Gather(&myEnergy,1,MPI::INT,
-			   &energies,1, MPI::INT,
-			   MASTER); 
+    print(f"Process {my_rank} out of {num_procs} realp {name}")
+
+    # Initialize random number generator with rank
+    random.seed(my_rank)
+
+    # Initialize App (assuming this is done elsewhere)
+    # App.init(argc, argv)  # In Python, we'd handle command line args differently
+
+    # Initialize Monte Carlo and/or Design
+    design = None
+    mc_sim = None
+
+    if App.designProgram:
+        design = Design()
+        if not App.useOldFormat:
+            design.init(App.fn_in)
+        else:
+            design.initOldFormat(App.fn_in)
+    else:
+        mc_sim = App.getMonteCarlo()
+
+    print("Finished initializing")
+
+    # Initialize betas (only on master)
+    if my_rank == MASTER:
+        init_betas(App.minBeta, App.maxBeta, num_procs, App.linear_T)
+
+    # Broadcast beta information
+    betaID2node = comm.bcast(betaID2node if my_rank == MASTER else None, root=MASTER)
+    betas = comm.bcast(betas if my_rank == MASTER else None, root=MASTER)
+    node2betaID = comm.bcast(node2betaID if my_rank == MASTER else None, root=MASTER)
     
-    int myNChains = mcSim->grancan->getNumFreeChains();
-    MPI::COMM_WORLD.Gather(&myNChains,1,MPI::INT,
-			   &nChains,1, MPI::INT,
-			   MASTER);
-    if(swapT){
-      if(myRank==MASTER){
-	//cout <<endl;
-	int start =0;// swap even
-	if (drand48()<0.5) start=1; //swap uneven
-	for(int i=start;i<num_procs-1;i=i+2){
-	  trySwap(i,i+1);
-	}
-      }
-    }
-    MPI::COMM_WORLD.Bcast(&node2betaID,num_procs,MPI::INT, MASTER);
-    MPI::COMM_WORLD.Bcast(&betaID2node,num_procs,MPI::INT, MASTER);
-    myBeta=betas[node2betaID[myRank]];
-  }
-  //double myEnergy = grancan->MC(steps,myBeta,node2betaID[myRank],true);
+    myBeta = betas[node2betaID[my_rank]]
+    print("Betas set")
 
-  /// finalize
-  if(App::designProgram){    
-    design->finalize();
-  }else{
-    mcSim->getMCStats(num_procs,myRank);
-  }
-  if(myRank==MASTER){
-    for(int  i = 0 ; i<num_procs;i++) {
-      cout << "beta " << i << "trials=" << swaptry[i] <<" acc=" << swapacc[i] << " ratio=" << (double)swapacc[i]/swaptry[i]  << endl;
-    }
-  }
+    # Main simulation loop
+    for swaps in range(mc_sim.total_swaps):
+        my_beta_changed = True
+        my_energy = 0
 
- 
-#ifdef LISA
-  //  cout << "waiting for barrier rank "<<myRank<<endl;
-  //MPI::COMM_WORLD.Barrier();
-  cout << "finalizing rank "<<myRank<<endl;
-  MPI::Finalize();
-#endif
-  cout << "close down process "<<myRank<<endl;
-  exit(0);
-}
+        if App.designProgram:
+            design.designProcedure(myBeta, mc_sim.steps)
+        else:
+            my_energy = mc_sim.MC(myBeta, node2betaID[my_rank], my_beta_changed)
 
+        # Gather energies and chain counts
+        energies = comm.gather(my_energy, root=MASTER)
+        my_n_chains = mc_sim.grancan.getNumFreeChains()
+        nChains = comm.gather(my_n_chains, root=MASTER)
 
-//double zz = log(eBetaMu);
+        if swapT and my_rank == MASTER:
+            start = 0 if random.random() < 0.5 else 1  # swap even or uneven
+            for i in range(start, num_procs - 1, 2):
+                try_swap(i, i + 1)
 
-bool trySwap(int betaID1, int betaID2){
-  cout <<"trial: "<<betaID1<<" "<<betaID2<<endl;
-  int node1 = betaID2node[betaID1];
-  int node2 = betaID2node[betaID2];
-  double beta1 = betas[betaID1];
-  double beta2 = betas[betaID2];
-  double realBeta1=100*beta1;
-  double realBeta2=100*beta2;
+        # Broadcast updated beta information
+        node2betaID = comm.bcast(node2betaID if my_rank == MASTER else None, root=MASTER)
+        betaID2node = comm.bcast(betaID2node if my_rank == MASTER else None, root=MASTER)
+        myBeta = betas[node2betaID[my_rank]]
 
-  double energy1 =energies[node1];
-  double energy2 =energies[node2];
+    # Finalize
+    if App.designProgram:
+        design.finalize()
+    else:
+        mc_sim.getMCStats(num_procs, my_rank)
 
-  int nChains1 = nChains[node1];
-  int nChains2 = nChains[node2];
+    if my_rank == MASTER:
+        for i in range(num_procs):
+            ratio = swapacc[i] / swaptry[i] if swaptry[i] > 0 else 0.0
+            print(f"beta {i} trials={swaptry[i]} acc={swapacc[i]} ratio={ratio}")
 
+    print(f"Finalizing rank {my_rank}")
+    MPI.Finalize()
+    print(f"Close down process {my_rank}")
+    sys.exit(0)
 
-  // cout<< "energies: " <<energy1<<" "<<energy2<<endl;
-  double dE = (double) (energy1-energy2);
-  double dB = beta1-beta2;
-  //double pAccSwap = exp(zz*dN + dE*dB);
-  double prefactor;  
-  if(LAMBDA_COR){
-    prefactor = pow(realBeta1/realBeta2,(3/2)*(nChains1-nChains2));
-  }else{
-    prefactor=1.0;
-  }
-
-  double pAccSwap = prefactor*exp( dE*dB);
-  swaptry[betaID1]++;
-  swaptry[betaID2]++;
-
-  // cout << "TRY SWAP between " <<node1 << " and " << node2<<endl;
-  if(drand48()<pAccSwap){
-    cout << "SWAPPING " << beta1 <<" with energy: "<< energy1 <<" at node "<<node1;
-    cout << " with " << beta2<<" with energy: "<< energy2<< " at node " <<node2<<endl;
-    betaID2node[betaID1] =node2;
-    betaID2node[betaID2] =node1;
-    node2betaID[node1]=betaID2;
-    node2betaID[node2]=betaID1;
-    swapacc[betaID1]++;
-    swapacc[betaID2]++;
-
-    //transitionRates->changeBeta(Cnat,ligC);
-    return true;
-  }else{
-    return false;
-  }
-}
-
-
-
-
-int initBetas(double minBeta,double maxBeta){
-  if(num_procs ==1){
-    betas[0]= (minBeta + maxBeta)/2;
-     betaID2node[0]=0;
-     node2betaID[0]=0;
-  }else{
-    if(!App::linear_T){
-      double step=(double)(maxBeta - minBeta)/(double) (num_procs-1);
-      for (int i=0;i<num_procs;i++){
-	betas[i]= minBeta + i*step;
-	betaID2node[i]=i;
-	node2betaID[i]=i;
-	cout<< "node "<<i<<" beta "<<betas[i]<<" T "<<0.01/ betas[i]<<endl;
-      }
-    }else{
-      double maxT =0.01/minBeta;
-      double minT =0.01/maxBeta;
-      double temperatures[MAX_PROCS];
-      double step=(double)(maxT - minT)/(double) (num_procs-1);
-      for (int i=0;i<num_procs;i++){
-	temperatures[num_procs - i-1]= minT + i*step;
-      }
-      for (int i=0;i<num_procs;i++){
-	betas[i]= 0.01/temperatures[i];
-	betaID2node[i]=i;
-	node2betaID[i]=i;
-	cout<< "node "<<i<<" beta "<<betas[i]<<" T "<<temperatures[i]<<endl;
-      }
-    }
-  }
-  return 0;
-}
+if __name__ == "__main__":
+    main()
